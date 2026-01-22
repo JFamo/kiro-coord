@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 import signal
+import json
 from typing import Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,12 +49,16 @@ async def create_kiro_process():
     env['COLUMNS'] = TERMINAL_COLS
     env['LINES'] = TERMINAL_ROWS
     
+    # Set working directory to ~/repo/ae
+    cwd = os.path.expanduser('~/repo/ae')
+    
     return await asyncio.create_subprocess_exec(
         "kiro-cli", "chat",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
-        env=env
+        env=env,
+        cwd=cwd
     )
 
 
@@ -116,6 +121,38 @@ async def delete_session(session_id: str):
         await cleanup_session(sessions[session_id])
         del sessions[session_id]
     return {"status": "deleted"}
+
+
+@app.get("/agents")
+async def get_agents():
+    """Get list of available agents from ~/.kiro/agents."""
+    try:
+        agents_dir = os.path.expanduser('~/.kiro/agents')
+        agents = []
+        
+        if os.path.exists(agents_dir):
+            for filename in os.listdir(agents_dir):
+                if filename.endswith('.json') and not filename.endswith('.example'):
+                    filepath = os.path.join(agents_dir, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            agent_config = json.load(f)
+                            agents.append({
+                                "id": filename[:-5],  # Remove .json extension
+                                "name": agent_config.get("name", filename[:-5]),
+                                "description": agent_config.get("description", ""),
+                                "model": agent_config.get("model"),
+                                "resources": agent_config.get("resources", []),
+                                "tools": agent_config.get("tools", []),
+                                "mcpServers": list(agent_config.get("mcpServers", {}).keys())
+                            })
+                    except Exception as e:
+                        # Skip invalid JSON files
+                        continue
+        
+        return agents
+    except Exception as e:
+        return []
 
 
 @app.post("/theme")
@@ -183,6 +220,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_json()
             if data["type"] == "input":
                 message = data["content"] + "\n"
+                # Store user input in history
+                user_display = f'\r\n\x1b[36m─────────────────────────────────────────────────────────────────────────────────\x1b[0m\r\n\x1b[1;36mUser:\x1b[0m {data["content"]}\r\n\x1b[36m─────────────────────────────────────────────────────────────────────────────────\x1b[0m\r\n'
+                session["history"].append(user_display)
+                # Send to Kiro process
                 process.stdin.write(message.encode())
                 await process.stdin.drain()
     except WebSocketDisconnect:

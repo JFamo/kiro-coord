@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button, ThemeProvider, createTheme, CssBaseline, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
-import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon, Edit as EditIcon, Info as InfoIcon } from '@mui/icons-material';
+import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon, Edit as EditIcon, Info as InfoIcon, Settings as SettingsIcon } from '@mui/icons-material';
 import '@xterm/xterm/css/xterm.css';
 import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme as terminalDarkTheme, lightTheme as terminalLightTheme } from './config';
 import { createTerminal, setupResizeHandler, normalizeLineEndings } from './terminalUtils';
@@ -14,6 +14,8 @@ function App() {
   const [renamingSessionId, setRenamingSessionId] = useState(null);
   const [newSessionName, setNewSessionName] = useState('');
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
+  const [showAgents, setShowAgents] = useState(false);
+  const [agents, setAgents] = useState([]);
   const wsRef = useRef(null);
   const terminalRef = useRef(null);
   const terminalContainerRef = useRef(null);
@@ -31,7 +33,10 @@ function App() {
 
   useEffect(() => {
     fetchSessions();
-  }, []);
+    if (showAgents) {
+      fetchAgents();
+    }
+  }, [showAgents]);
 
   useEffect(() => {
     if (terminalRef.current) {
@@ -75,6 +80,12 @@ function App() {
     const res = await fetch(`${API_URL}/sessions`);
     const data = await res.json();
     setSessions(data);
+  };
+
+  const fetchAgents = async () => {
+    const res = await fetch(`${API_URL}/agents`);
+    const data = await res.json();
+    setAgents(data);
   };
 
   const toggleTheme = async () => {
@@ -262,8 +273,30 @@ function App() {
             ))}
           </List>
           <Box sx={{ mt: 'auto', p: 2 }}>
-            <Button fullWidth variant="contained" startIcon={<AddIcon />} onClick={createSession}>
+            <Button fullWidth variant="contained" startIcon={<AddIcon />} onClick={createSession} sx={{ mb: 1 }}>
               New Session
+            </Button>
+            <Button 
+              fullWidth 
+              variant="outlined" 
+              startIcon={<SettingsIcon />} 
+              onClick={() => {
+                setShowAgents(true);
+                setActiveSessionId(null);
+                if (wsRef.current) {
+                  wsRef.current.close();
+                  wsRef.current = null;
+                }
+                if (terminalRef.current) {
+                  if (terminalRef.current._resizeObserver) {
+                    terminalRef.current._resizeObserver.disconnect();
+                  }
+                  terminalRef.current.dispose();
+                  terminalRef.current = null;
+                }
+              }}
+            >
+              Agents
             </Button>
           </Box>
         </Box>
@@ -271,7 +304,50 @@ function App() {
       
       <Box component="main" sx={{ flexGrow: 1, p: 3, display: 'flex', flexDirection: 'column' }}>
         <Toolbar />
-        {activeSessionId ? (
+        {showAgents ? (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5">Agents</Typography>
+              <Button 
+                variant="outlined" 
+                onClick={() => setShowAgents(false)}
+              >
+                Back to Sessions
+              </Button>
+            </Box>
+            {agents.length === 0 ? (
+              <Typography color="text.secondary">No agents found in ~/.kiro/agents</Typography>
+            ) : (
+              <List>
+                {agents.map((agent) => (
+                  <Paper key={agent.id} sx={{ mb: 2, p: 2 }}>
+                    <Typography variant="h6">{agent.name}</Typography>
+                    {agent.description && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {agent.description}
+                      </Typography>
+                    )}
+                    {agent.model && (
+                      <Typography variant="caption" display="block">
+                        Model: {agent.model}
+                      </Typography>
+                    )}
+                    {agent.mcpServers.length > 0 && (
+                      <Typography variant="caption" display="block">
+                        MCP Servers: {agent.mcpServers.join(', ')}
+                      </Typography>
+                    )}
+                    {agent.resources.length > 0 && (
+                      <Typography variant="caption" display="block">
+                        Resources: {agent.resources.length} configured
+                      </Typography>
+                    )}
+                  </Paper>
+                ))}
+              </List>
+            )}
+          </Box>
+        ) : activeSessionId ? (
           <>
             <Paper sx={{ flexGrow: 1, mb: 2, overflow: 'hidden', p: 0 }}>
               <Box ref={terminalContainerRef} sx={{ width: '100%', height: '100%' }} />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button } from '@mui/material';
-import { Add as AddIcon, Close as CloseIcon } from '@mui/icons-material';
+import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon } from '@mui/icons-material';
 import AnsiToHtml from 'ansi-to-html';
 
 const DRAWER_WIDTH = 240;
@@ -14,6 +14,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [output, setOutput] = useState('');
   const [input, setInput] = useState('');
+  const [theme, setTheme] = useState('dark');
   const wsRef = useRef(null);
   const outputEndRef = useRef(null);
 
@@ -31,6 +32,16 @@ function App() {
     setSessions(data);
   };
 
+  const toggleTheme = async () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    await fetch(`${API_URL}/theme`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: newTheme })
+    });
+    setTheme(newTheme);
+  };
+
   const createSession = async () => {
     const name = `Session ${sessions.length + 1}`;
     const res = await fetch(`${API_URL}/sessions`, {
@@ -40,7 +51,7 @@ function App() {
     });
     const session = await res.json();
     setSessions([...sessions, session]);
-    setActiveSessionId(session.id);
+    connectToSession(session.id);
   };
 
   const deleteSession = async (sessionId) => {
@@ -65,6 +76,9 @@ function App() {
     setOutput('');
     
     const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'output') {
@@ -74,14 +88,23 @@ function App() {
       }
     };
     ws.onclose = () => {
+      console.log('WebSocket closed');
       setOutput(prev => prev + '\n[Connection closed]\n');
+    };
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
     };
     wsRef.current = ws;
   };
 
   const sendMessage = () => {
-    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    console.log('sendMessage called', { input, wsState: wsRef.current?.readyState });
+    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log('Message not sent - validation failed');
+      return;
+    }
     
+    console.log('Sending message:', input);
     setOutput(prev => prev + '\n> ' + input + '\n');
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
@@ -98,9 +121,12 @@ function App() {
     <Box sx={{ display: 'flex', height: '100vh' }}>
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
         <Toolbar>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             Kiro Coordinator
           </Typography>
+          <IconButton color="inherit" onClick={toggleTheme}>
+            {theme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+          </IconButton>
         </Toolbar>
       </AppBar>
       

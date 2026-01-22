@@ -22,6 +22,10 @@ class Session(BaseModel):
     name: str
 
 
+class ThemeRequest(BaseModel):
+    theme: str
+
+
 @app.get("/sessions")
 async def get_sessions():
     return [{"id": sid, "name": s["name"]} for sid, s in sessions.items()]
@@ -30,10 +34,23 @@ async def get_sessions():
 @app.post("/sessions")
 async def create_session(session: Session):
     session_id = str(uuid.uuid4())
+    
+    # Start Kiro process immediately
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "kiro-cli", "chat",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+    except FileNotFoundError:
+        return {"error": "kiro-cli not found in PATH"}
+    
     sessions[session_id] = {
         "name": session.name,
-        "process": None,
-        "history": []
+        "process": process,
+        "history": [],
+        "websockets": []
     }
     return {"id": session_id, "name": session.name}
 
@@ -41,14 +58,43 @@ async def create_session(session: Session):
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     if session_id in sessions:
-        if sessions[session_id]["process"]:
+        session = sessions[session_id]
+        
+        # Close all websockets
+        for ws in session.get("websockets", []):
             try:
-                sessions[session_id]["process"].terminate()
-                await sessions[session_id]["process"].wait()
+                await ws.close()
             except:
                 pass
+        
+        # Cancel output task
+        if session.get("output_task"):
+            session["output_task"].cancel()
+        
+        # Terminate process
+        if session["process"]:
+            try:
+                session["process"].terminate()
+                await session["process"].wait()
+            except:
+                pass
+        
         del sessions[session_id]
     return {"status": "deleted"}
+
+
+@app.post("/theme")
+async def set_theme(request: ThemeRequest):
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "kiro-cli", "theme", request.theme,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.wait()
+        return {"status": "success", "theme": request.theme}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.websocket("/ws/{session_id}")
@@ -59,19 +105,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
     
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "kiro-cli", "chat",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT
-        )
-    except FileNotFoundError:
-        await websocket.send_json({"type": "error", "content": "kiro-cli not found in PATH"})
-        await websocket.close()
-        return
+    session = sessions[session_id]
+    process = session["process"]
     
-    sessions[session_id]["process"] = process
+    # Add this websocket to the session's list
+    session["websockets"].append(websocket)
+    
+    # Send existing history to new connection
+    for msg in session["history"]:
+        await websocket.send_json({"type": "output", "content": msg})
     
     async def read_output():
         try:
@@ -80,11 +122,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if not chunk:
                     break
                 text = chunk.decode('utf-8', errors='replace')
-                await websocket.send_json({"type": "output", "content": text})
+                session["history"].append(text)
+                # Broadcast to all connected websockets
+                for ws in session["websockets"]:
+                    try:
+                        await ws.send_json({"type": "output", "content": text})
+                    except:
+                        pass
         except Exception as e:
-            await websocket.send_json({"type": "error", "content": str(e)})
+            for ws in session["websockets"]:
+                try:
+                    await ws.send_json({"type": "error", "content": str(e)})
+                except:
+                    pass
     
-    output_task = asyncio.create_task(read_output())
+    # Only start reading if not already reading
+    if not hasattr(session, "output_task") or session.get("output_task") is None:
+        session["output_task"] = asyncio.create_task(read_output())
     
     try:
         while True:
@@ -96,11 +150,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        output_task.cancel()
-        try:
-            process.terminate()
-            await process.wait()
-        except:
-            pass
-        if session_id in sessions:
-            sessions[session_id]["process"] = None
+        # Remove this websocket from the session
+        if websocket in session["websockets"]:
+            session["websockets"].remove(websocket)

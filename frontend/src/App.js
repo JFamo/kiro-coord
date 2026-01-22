@@ -111,6 +111,9 @@ function App() {
         wsRef.current = null;
       }
       if (terminalRef.current) {
+        if (terminalRef.current._resizeObserver) {
+          terminalRef.current._resizeObserver.disconnect();
+        }
         terminalRef.current.dispose();
         terminalRef.current = null;
       }
@@ -149,11 +152,22 @@ function App() {
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
       
-      // Handle window resize
+      // Handle window resize with debounce
+      let resizeTimeout;
       const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+          try {
+            fitAddon.fit();
+          } catch (e) {
+            // Ignore resize errors
+          }
+        }, 100);
       });
       resizeObserver.observe(terminalContainerRef.current);
+      
+      // Store observer for cleanup
+      terminal._resizeObserver = resizeObserver;
       
       const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
       ws.onopen = () => {

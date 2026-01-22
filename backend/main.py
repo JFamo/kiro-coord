@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+import signal
 from typing import Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +23,14 @@ app.add_middleware(
 )
 
 sessions: Dict[str, dict] = {}
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up all sessions on server shutdown."""
+    for session_id in list(sessions.keys()):
+        await cleanup_session(sessions[session_id])
+    sessions.clear()
 
 
 class Session(BaseModel):
@@ -84,7 +93,8 @@ async def create_session(session: Session):
         "name": session.name,
         "process": process,
         "history": [],
-        "websockets": []
+        "websockets": [],
+        "output_task": None
     }
     return {"id": session_id, "name": session.name}
 
@@ -138,20 +148,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 text = chunk.decode('utf-8', errors='replace')
                 session["history"].append(text)
                 # Broadcast to all connected websockets
-                for ws in session["websockets"]:
+                for ws in session["websockets"][:]:  # Copy list to avoid modification during iteration
                     try:
                         await ws.send_json({"type": "output", "content": text})
                     except:
                         pass
         except Exception as e:
-            for ws in session["websockets"]:
-                try:
-                    await ws.send_json({"type": "error", "content": str(e)})
-                except:
-                    pass
+            error_msg = str(e)
+            # Only log non-concurrent read errors
+            if "already waiting" not in error_msg:
+                for ws in session["websockets"][:]:
+                    try:
+                        await ws.send_json({"type": "error", "content": error_msg})
+                    except:
+                        pass
     
     # Only start reading if not already reading
-    if not hasattr(session, "output_task") or session.get("output_task") is None:
+    if session.get("output_task") is None or session["output_task"].done():
         session["output_task"] = asyncio.create_task(read_output())
     
     try:

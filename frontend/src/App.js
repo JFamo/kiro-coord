@@ -118,6 +118,12 @@ function App() {
       return;
     }
     
+    // Display user message with clear styling
+    if (terminalRef.current) {
+      const userMessage = `\r\n\x1b[36m─────────────────────────────────────────────────────────────────────────────────\x1b[0m\r\n\x1b[1;36mUser:\x1b[0m ${input}\r\n\x1b[36m─────────────────────────────────────────────────────────────────────────────────\x1b[0m\r\n`;
+      terminalRef.current.write(userMessage);
+    }
+    
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
   };

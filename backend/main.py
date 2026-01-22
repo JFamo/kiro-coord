@@ -42,7 +42,11 @@ async def create_session(session: Session):
 async def delete_session(session_id: str):
     if session_id in sessions:
         if sessions[session_id]["process"]:
-            sessions[session_id]["process"].terminate()
+            try:
+                sessions[session_id]["process"].terminate()
+                await sessions[session_id]["process"].wait()
+            except:
+                pass
         del sessions[session_id]
     return {"status": "deleted"}
 
@@ -55,26 +59,30 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
     
-    process = await asyncio.create_subprocess_exec(
-        "kiro-cli", "chat",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "kiro-cli", "chat",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+    except FileNotFoundError:
+        await websocket.send_json({"type": "error", "content": "kiro-cli not found in PATH"})
+        await websocket.close()
+        return
     
     sessions[session_id]["process"] = process
     
     async def read_output():
         try:
             while True:
-                line = await process.stdout.readline()
-                if not line:
+                chunk = await process.stdout.read(1024)
+                if not chunk:
                     break
-                text = line.decode().rstrip()
-                sessions[session_id]["history"].append({"role": "assistant", "content": text})
+                text = chunk.decode('utf-8', errors='replace')
                 await websocket.send_json({"type": "output", "content": text})
-        except Exception:
-            pass
+        except Exception as e:
+            await websocket.send_json({"type": "error", "content": str(e)})
     
     output_task = asyncio.create_task(read_output())
     
@@ -83,9 +91,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_json()
             if data["type"] == "input":
                 message = data["content"] + "\n"
-                sessions[session_id]["history"].append({"role": "user", "content": data["content"]})
                 process.stdin.write(message.encode())
                 await process.stdin.drain()
     except WebSocketDisconnect:
+        pass
+    finally:
         output_task.cancel()
-        process.terminate()
+        try:
+            process.terminate()
+            await process.wait()
+        except:
+            pass
+        if session_id in sessions:
+            sessions[session_id]["process"] = None

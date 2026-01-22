@@ -9,18 +9,18 @@ const WS_URL = 'ws://localhost:8000';
 function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [output, setOutput] = useState('');
   const [input, setInput] = useState('');
   const wsRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const outputEndRef = useRef(null);
 
   useEffect(() => {
     fetchSessions();
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [output]);
 
   const fetchSessions = async () => {
     const res = await fetch(`${API_URL}/sessions`);
@@ -45,7 +45,7 @@ function App() {
     setSessions(sessions.filter(s => s.id !== sessionId));
     if (activeSessionId === sessionId) {
       setActiveSessionId(null);
-      setMessages([]);
+      setOutput('');
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -59,24 +59,36 @@ function App() {
     }
     
     setActiveSessionId(sessionId);
-    setMessages([]);
+    setOutput('');
     
     const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'output') {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.content }]);
+        setOutput(prev => prev + data.content);
+      } else if (data.type === 'error') {
+        setOutput(prev => prev + '\n[ERROR] ' + data.content + '\n');
       }
+    };
+    ws.onclose = () => {
+      setOutput(prev => prev + '\n[Connection closed]\n');
     };
     wsRef.current = ws;
   };
 
   const sendMessage = () => {
-    if (!input.trim() || !wsRef.current) return;
+    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     
-    setMessages(prev => [...prev, { role: 'user', content: input }]);
+    setOutput(prev => prev + '\n> ' + input + '\n');
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   return (
@@ -131,32 +143,31 @@ function App() {
         <Toolbar />
         {activeSessionId ? (
           <>
-            <Paper sx={{ flexGrow: 1, p: 2, mb: 2, overflow: 'auto' }}>
-              {messages.map((msg, idx) => (
-                <Box key={idx} sx={{ mb: 1, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
-                  <Typography
-                    component="span"
-                    sx={{
-                      display: 'inline-block',
-                      p: 1,
-                      borderRadius: 1,
-                      bgcolor: msg.role === 'user' ? 'primary.main' : 'grey.200',
-                      color: msg.role === 'user' ? 'white' : 'black'
-                    }}
-                  >
-                    {msg.content}
-                  </Typography>
-                </Box>
-              ))}
-              <div ref={messagesEndRef} />
+            <Paper sx={{ flexGrow: 1, p: 2, mb: 2, overflow: 'auto', bgcolor: '#1e1e1e' }}>
+              <Typography
+                component="pre"
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: '14px',
+                  color: '#d4d4d4',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  margin: 0
+                }}
+              >
+                {output}
+              </Typography>
+              <div ref={outputEndRef} />
             </Paper>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField
                 fullWidth
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                onKeyDown={handleKeyDown}
                 placeholder="Type a message..."
+                multiline
+                maxRows={4}
               />
               <Button variant="contained" onClick={sendMessage}>Send</Button>
             </Box>

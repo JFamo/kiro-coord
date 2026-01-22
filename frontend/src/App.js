@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button } from '@mui/material';
 import { Add as AddIcon, Close as CloseIcon } from '@mui/icons-material';
+import AnsiToHtml from 'ansi-to-html';
 
 const DRAWER_WIDTH = 240;
 const API_URL = 'http://localhost:8000';
 const WS_URL = 'ws://localhost:8000';
+
+const ansiConverter = new AnsiToHtml({ fg: '#d4d4d4', bg: '#1e1e1e' });
 
 function App() {
   const [sessions, setSessions] = useState([]);
@@ -144,19 +147,15 @@ function App() {
         {activeSessionId ? (
           <>
             <Paper sx={{ flexGrow: 1, p: 2, mb: 2, overflow: 'auto', bgcolor: '#1e1e1e' }}>
-              <Typography
-                component="pre"
+              <Box
                 sx={{
                   fontFamily: 'monospace',
                   fontSize: '14px',
-                  color: '#d4d4d4',
                   whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  margin: 0
+                  wordBreak: 'break-word'
                 }}
-              >
-                {output}
-              </Typography>
+                dangerouslySetInnerHTML={{ __html: ansiConverter.toHtml(output) }}
+              />
               <div ref={outputEndRef} />
             </Paper>
             <Box sx={{ display: 'flex', gap: 1 }}>

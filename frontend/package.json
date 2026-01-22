@@ -7,7 +7,8 @@
     "@mui/icons-material": "^5.15.0",
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "ansi-to-html": "^0.7.2",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"

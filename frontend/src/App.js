@@ -1,30 +1,77 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button } from '@mui/material';
 import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon } from '@mui/icons-material';
-import AnsiToHtml from 'ansi-to-html';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 
 const DRAWER_WIDTH = 240;
 const API_URL = 'http://localhost:8000';
 const WS_URL = 'ws://localhost:8000';
 
-const ansiConverter = new AnsiToHtml({ fg: '#d4d4d4', bg: '#1e1e1e' });
+const darkTheme = {
+  background: '#1e1e1e',
+  foreground: '#d4d4d4',
+  cursor: '#d4d4d4',
+  black: '#000000',
+  red: '#cd3131',
+  green: '#0dbc79',
+  yellow: '#e5e510',
+  blue: '#2472c8',
+  magenta: '#bc3fbc',
+  cyan: '#11a8cd',
+  white: '#e5e5e5',
+  brightBlack: '#666666',
+  brightRed: '#f14c4c',
+  brightGreen: '#23d18b',
+  brightYellow: '#f5f543',
+  brightBlue: '#3b8eea',
+  brightMagenta: '#d670d6',
+  brightCyan: '#29b8db',
+  brightWhite: '#e5e5e5'
+};
+
+const lightTheme = {
+  background: '#ffffff',
+  foreground: '#000000',
+  cursor: '#000000',
+  black: '#000000',
+  red: '#cd3131',
+  green: '#00bc00',
+  yellow: '#949800',
+  blue: '#0451a5',
+  magenta: '#bc05bc',
+  cyan: '#0598bc',
+  white: '#555555',
+  brightBlack: '#666666',
+  brightRed: '#cd3131',
+  brightGreen: '#14ce14',
+  brightYellow: '#b5ba00',
+  brightBlue: '#0451a5',
+  brightMagenta: '#bc05bc',
+  brightCyan: '#0598bc',
+  brightWhite: '#a5a5a5'
+};
 
 function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [output, setOutput] = useState('');
   const [input, setInput] = useState('');
   const [theme, setTheme] = useState('dark');
   const wsRef = useRef(null);
-  const outputEndRef = useRef(null);
+  const terminalRef = useRef(null);
+  const terminalContainerRef = useRef(null);
+  const fitAddonRef = useRef(null);
 
   useEffect(() => {
     fetchSessions();
   }, []);
 
   useEffect(() => {
-    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [output]);
+    if (terminalRef.current) {
+      terminalRef.current.options.theme = theme === 'dark' ? darkTheme : lightTheme;
+    }
+  }, [theme]);
 
   const fetchSessions = async () => {
     const res = await fetch(`${API_URL}/sessions`);
@@ -59,10 +106,13 @@ function App() {
     setSessions(sessions.filter(s => s.id !== sessionId));
     if (activeSessionId === sessionId) {
       setActiveSessionId(null);
-      setOutput('');
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
+      }
+      if (terminalRef.current) {
+        terminalRef.current.dispose();
+        terminalRef.current = null;
       }
     }
   };
@@ -72,29 +122,60 @@ function App() {
       wsRef.current.close();
     }
     
-    setActiveSessionId(sessionId);
-    setOutput('');
+    if (terminalRef.current) {
+      terminalRef.current.dispose();
+    }
     
-    const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-    };
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'output') {
-        setOutput(prev => prev + data.content);
-      } else if (data.type === 'error') {
-        setOutput(prev => prev + '\n[ERROR] ' + data.content + '\n');
-      }
-    };
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-      setOutput(prev => prev + '\n[Connection closed]\n');
-    };
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-    wsRef.current = ws;
+    setActiveSessionId(sessionId);
+    
+    // Wait for next tick to ensure DOM is ready
+    setTimeout(() => {
+      if (!terminalContainerRef.current) return;
+      
+      // Create new terminal
+      const terminal = new Terminal({
+        cursorBlink: true,
+        theme: theme === 'dark' ? darkTheme : lightTheme,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        scrollback: 10000
+      });
+      
+      const fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.open(terminalContainerRef.current);
+      fitAddon.fit();
+      
+      terminalRef.current = terminal;
+      fitAddonRef.current = fitAddon;
+      
+      // Handle window resize
+      const resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+      });
+      resizeObserver.observe(terminalContainerRef.current);
+      
+      const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'output') {
+          terminal.write(data.content);
+        } else if (data.type === 'error') {
+          terminal.write('\r\n[ERROR] ' + data.content + '\r\n');
+        }
+      };
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+        terminal.write('\r\n[Connection closed]\r\n');
+      };
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+      wsRef.current = ws;
+    }, 0);
   };
 
   const sendMessage = () => {
@@ -105,7 +186,9 @@ function App() {
     }
     
     console.log('Sending message:', input);
-    setOutput(prev => prev + '\n> ' + input + '\n');
+    if (terminalRef.current) {
+      terminalRef.current.write('\r\n> ' + input + '\r\n');
+    }
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
   };
@@ -172,17 +255,8 @@ function App() {
         <Toolbar />
         {activeSessionId ? (
           <>
-            <Paper sx={{ flexGrow: 1, p: 2, mb: 2, overflow: 'auto', bgcolor: '#1e1e1e' }}>
-              <Box
-                sx={{
-                  fontFamily: 'monospace',
-                  fontSize: '14px',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word'
-                }}
-                dangerouslySetInnerHTML={{ __html: ansiConverter.toHtml(output) }}
-              />
-              <div ref={outputEndRef} />
+            <Paper sx={{ flexGrow: 1, mb: 2, overflow: 'hidden', p: 0 }}>
+              <Box ref={terminalContainerRef} sx={{ width: '100%', height: '100%' }} />
             </Paper>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField

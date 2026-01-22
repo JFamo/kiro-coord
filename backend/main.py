@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from typing import Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,13 +36,18 @@ async def get_sessions():
 async def create_session(session: Session):
     session_id = str(uuid.uuid4())
     
-    # Start Kiro process immediately
+    # Start Kiro process with terminal size environment variables
     try:
+        env = os.environ.copy()
+        env['COLUMNS'] = '120'
+        env['LINES'] = '30'
+        
         process = await asyncio.create_subprocess_exec(
             "kiro-cli", "chat",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT
+            stderr=asyncio.subprocess.STDOUT,
+            env=env
         )
     except FileNotFoundError:
         return {"error": "kiro-cli not found in PATH"}

@@ -135,19 +135,29 @@ function App() {
     setTimeout(() => {
       if (!terminalContainerRef.current) return;
       
-      // Create new terminal
+      // Create new terminal with reasonable max width
       const terminal = new Terminal({
         cursorBlink: true,
         theme: theme === 'dark' ? darkTheme : lightTheme,
         fontSize: 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        scrollback: 10000
+        scrollback: 10000,
+        cols: 120,  // Set reasonable default width
+        rows: 30
       });
       
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(terminalContainerRef.current);
+      
+      // Fit but don't exceed reasonable dimensions
       fitAddon.fit();
+      if (terminal.cols > 120) {
+        terminal.resize(120, terminal.rows);
+      }
+      
+      // Log the terminal dimensions after fitting
+      console.log('Terminal dimensions:', terminal.cols, 'x', terminal.rows);
       
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
@@ -176,14 +186,16 @@ function App() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'output') {
-          terminal.write(data.content);
+          // Convert LF to CRLF for proper xterm rendering
+          const fixed = data.content.replace(/\r?\n/g, '\r\n');
+          terminal.write(fixed);
         } else if (data.type === 'error') {
-          terminal.write('\r\n[ERROR] ' + data.content + '\r\n');
+          terminal.write('[ERROR] ' + data.content);
         }
       };
       ws.onclose = () => {
         console.log('WebSocket closed');
-        terminal.write('\r\n[Connection closed]\r\n');
+        terminal.write('[Connection closed]');
       };
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
@@ -200,9 +212,6 @@ function App() {
     }
     
     console.log('Sending message:', input);
-    if (terminalRef.current) {
-      terminalRef.current.write('\r\n> ' + input + '\r\n');
-    }
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
   };

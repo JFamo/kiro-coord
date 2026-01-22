@@ -1,57 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button } from '@mui/material';
 import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon } from '@mui/icons-material';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-
-const DRAWER_WIDTH = 240;
-const API_URL = 'http://localhost:8000';
-const WS_URL = 'ws://localhost:8000';
-
-const darkTheme = {
-  background: '#1e1e1e',
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  black: '#000000',
-  red: '#cd3131',
-  green: '#0dbc79',
-  yellow: '#e5e510',
-  blue: '#2472c8',
-  magenta: '#bc3fbc',
-  cyan: '#11a8cd',
-  white: '#e5e5e5',
-  brightBlack: '#666666',
-  brightRed: '#f14c4c',
-  brightGreen: '#23d18b',
-  brightYellow: '#f5f543',
-  brightBlue: '#3b8eea',
-  brightMagenta: '#d670d6',
-  brightCyan: '#29b8db',
-  brightWhite: '#e5e5e5'
-};
-
-const lightTheme = {
-  background: '#ffffff',
-  foreground: '#000000',
-  cursor: '#000000',
-  black: '#000000',
-  red: '#cd3131',
-  green: '#00bc00',
-  yellow: '#949800',
-  blue: '#0451a5',
-  magenta: '#bc05bc',
-  cyan: '#0598bc',
-  white: '#555555',
-  brightBlack: '#666666',
-  brightRed: '#cd3131',
-  brightGreen: '#14ce14',
-  brightYellow: '#b5ba00',
-  brightBlue: '#0451a5',
-  brightMagenta: '#bc05bc',
-  brightCyan: '#0598bc',
-  brightWhite: '#a5a5a5'
-};
+import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme, lightTheme } from './config';
+import { createTerminal, setupResizeHandler, normalizeLineEndings } from './terminalUtils';
 
 function App() {
   const [sessions, setSessions] = useState([]);
@@ -131,87 +83,41 @@ function App() {
     
     setActiveSessionId(sessionId);
     
-    // Wait for next tick to ensure DOM is ready
     setTimeout(() => {
       if (!terminalContainerRef.current) return;
       
-      // Create new terminal with reasonable max width
-      const terminal = new Terminal({
-        cursorBlink: true,
-        theme: theme === 'dark' ? darkTheme : lightTheme,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        scrollback: 10000,
-        cols: 120,  // Set reasonable default width
-        rows: 30
-      });
-      
-      const fitAddon = new FitAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.open(terminalContainerRef.current);
-      
-      // Fit but don't exceed reasonable dimensions
-      fitAddon.fit();
-      if (terminal.cols > 120) {
-        terminal.resize(120, terminal.rows);
-      }
-      
-      // Log the terminal dimensions after fitting
-      console.log('Terminal dimensions:', terminal.cols, 'x', terminal.rows);
+      const { terminal, fitAddon } = createTerminal(
+        theme === 'dark' ? darkTheme : lightTheme,
+        terminalContainerRef.current
+      );
       
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
       
-      // Handle window resize with debounce
-      let resizeTimeout;
-      const resizeObserver = new ResizeObserver(() => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
-          try {
-            fitAddon.fit();
-          } catch (e) {
-            // Ignore resize errors
-          }
-        }, 100);
-      });
-      resizeObserver.observe(terminalContainerRef.current);
-      
-      // Store observer for cleanup
+      const resizeObserver = setupResizeHandler(terminalContainerRef.current, fitAddon);
       terminal._resizeObserver = resizeObserver;
       
       const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-      };
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'output') {
-          // Convert LF to CRLF for proper xterm rendering
-          const fixed = data.content.replace(/\r?\n/g, '\r\n');
-          terminal.write(fixed);
+          terminal.write(normalizeLineEndings(data.content));
         } else if (data.type === 'error') {
           terminal.write('[ERROR] ' + data.content);
         }
       };
       ws.onclose = () => {
-        console.log('WebSocket closed');
         terminal.write('[Connection closed]');
-      };
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
       };
       wsRef.current = ws;
     }, 0);
   };
 
   const sendMessage = () => {
-    console.log('sendMessage called', { input, wsState: wsRef.current?.readyState });
     if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.log('Message not sent - validation failed');
       return;
     }
     
-    console.log('Sending message:', input);
     wsRef.current.send(JSON.stringify({ type: 'input', content: input }));
     setInput('');
   };

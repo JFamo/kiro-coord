@@ -6,11 +6,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Configuration
+FRONTEND_URL = "http://localhost:3000"
+TERMINAL_COLS = "120"
+TERMINAL_ROWS = "30"
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +32,40 @@ class ThemeRequest(BaseModel):
     theme: str
 
 
+async def create_kiro_process():
+    """Create a Kiro CLI process with proper terminal environment."""
+    env = os.environ.copy()
+    env['COLUMNS'] = TERMINAL_COLS
+    env['LINES'] = TERMINAL_ROWS
+    
+    return await asyncio.create_subprocess_exec(
+        "kiro-cli", "chat",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=env
+    )
+
+
+async def cleanup_session(session: dict):
+    """Clean up session resources."""
+    for ws in session.get("websockets", []):
+        try:
+            await ws.close()
+        except:
+            pass
+    
+    if session.get("output_task"):
+        session["output_task"].cancel()
+    
+    if session["process"]:
+        try:
+            session["process"].terminate()
+            await session["process"].wait()
+        except:
+            pass
+
+
 @app.get("/sessions")
 async def get_sessions():
     return [{"id": sid, "name": s["name"]} for sid, s in sessions.items()]
@@ -36,19 +75,8 @@ async def get_sessions():
 async def create_session(session: Session):
     session_id = str(uuid.uuid4())
     
-    # Start Kiro process with terminal size environment variables
     try:
-        env = os.environ.copy()
-        env['COLUMNS'] = '120'
-        env['LINES'] = '30'
-        
-        process = await asyncio.create_subprocess_exec(
-            "kiro-cli", "chat",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=env
-        )
+        process = await create_kiro_process()
     except FileNotFoundError:
         return {"error": "kiro-cli not found in PATH"}
     
@@ -64,27 +92,7 @@ async def create_session(session: Session):
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     if session_id in sessions:
-        session = sessions[session_id]
-        
-        # Close all websockets
-        for ws in session.get("websockets", []):
-            try:
-                await ws.close()
-            except:
-                pass
-        
-        # Cancel output task
-        if session.get("output_task"):
-            session["output_task"].cancel()
-        
-        # Terminate process
-        if session["process"]:
-            try:
-                session["process"].terminate()
-                await session["process"].wait()
-            except:
-                pass
-        
+        await cleanup_session(sessions[session_id])
         del sessions[session_id]
     return {"status": "deleted"}
 

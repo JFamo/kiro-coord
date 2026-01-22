@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button } from '@mui/material';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon } from '@mui/icons-material';
 import '@xterm/xterm/css/xterm.css';
-import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme, lightTheme } from './config';
+import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme as terminalDarkTheme, lightTheme as terminalLightTheme } from './config';
 import { createTerminal, setupResizeHandler, normalizeLineEndings } from './terminalUtils';
 
 function App() {
@@ -15,13 +15,23 @@ function App() {
   const terminalContainerRef = useRef(null);
   const fitAddonRef = useRef(null);
 
+  const muiTheme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode: theme,
+        },
+      }),
+    [theme]
+  );
+
   useEffect(() => {
     fetchSessions();
   }, []);
 
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.options.theme = theme === 'dark' ? darkTheme : lightTheme;
+      terminalRef.current.options.theme = theme === 'dark' ? terminalDarkTheme : terminalLightTheme;
     }
   }, [theme]);
 
@@ -87,7 +97,7 @@ function App() {
       if (!terminalContainerRef.current) return;
       
       const { terminal, fitAddon } = createTerminal(
-        theme === 'dark' ? darkTheme : lightTheme,
+        theme === 'dark' ? terminalDarkTheme : terminalLightTheme,
         terminalContainerRef.current
       );
       
@@ -136,7 +146,9 @@ function App() {
   };
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh' }}>
+    <ThemeProvider theme={muiTheme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', height: '100vh' }}>
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
         <Toolbar>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
@@ -215,6 +227,7 @@ function App() {
         )}
       </Box>
     </Box>
+    </ThemeProvider>
   );
 }
 

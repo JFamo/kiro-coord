@@ -23,6 +23,7 @@ app.add_middleware(
 )
 
 sessions: Dict[str, dict] = {}
+session_counter = 0
 
 
 @app.on_event("shutdown")
@@ -82,7 +83,12 @@ async def get_sessions():
 
 @app.post("/sessions")
 async def create_session(session: Session):
+    global session_counter
+    session_counter += 1
     session_id = str(uuid.uuid4())
+    
+    # Use counter for default name if not provided or if it's a default name
+    name = session.name if session.name and not session.name.startswith("Session ") else f"Session {session_counter}"
     
     try:
         process = await create_kiro_process()
@@ -90,16 +96,21 @@ async def create_session(session: Session):
         return {"error": "kiro-cli not found in PATH"}
     
     sessions[session_id] = {
-        "name": session.name,
+        "name": name,
         "process": process,
         "history": [],
         "websockets": [],
         "output_task": None
     }
-    return {"id": session_id, "name": session.name}
+    return {"id": session_id, "name": name}
 
 
-@app.delete("/sessions/{session_id}")
+@app.put("/sessions/{session_id}")
+async def update_session(session_id: str, session: Session):
+    if session_id in sessions:
+        sessions[session_id]["name"] = session.name
+        return {"id": session_id, "name": session.name}
+    return {"error": "Session not found"}
 async def delete_session(session_id: str):
     if session_id in sessions:
         await cleanup_session(sessions[session_id])

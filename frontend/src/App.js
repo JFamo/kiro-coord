@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
-import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon } from '@mui/icons-material';
+import { Box, Drawer, List, ListItem, ListItemButton, ListItemText, IconButton, TextField, Paper, Typography, AppBar, Toolbar, Button, ThemeProvider, createTheme, CssBaseline, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMode as DarkModeIcon, Edit as EditIcon, Info as InfoIcon } from '@mui/icons-material';
 import '@xterm/xterm/css/xterm.css';
 import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme as terminalDarkTheme, lightTheme as terminalLightTheme } from './config';
 import { createTerminal, setupResizeHandler, normalizeLineEndings } from './terminalUtils';
@@ -10,6 +10,10 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [input, setInput] = useState('');
   const [theme, setTheme] = useState('dark');
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState(null);
+  const [newSessionName, setNewSessionName] = useState('');
+  const [infoDialogOpen, setInfoDialogOpen] = useState(false);
   const wsRef = useRef(null);
   const terminalRef = useRef(null);
   const terminalContainerRef = useRef(null);
@@ -35,6 +39,38 @@ function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Cmd+Shift+Arrow keys for navigation (won't conflict with browser)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          navigateToPreviousSession();
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          navigateToNextSession();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sessions, activeSessionId]);
+
+  const navigateToPreviousSession = () => {
+    if (sessions.length === 0) return;
+    const currentIndex = sessions.findIndex(s => s.id === activeSessionId);
+    const previousIndex = currentIndex <= 0 ? sessions.length - 1 : currentIndex - 1;
+    connectToSession(sessions[previousIndex].id);
+  };
+
+  const navigateToNextSession = () => {
+    if (sessions.length === 0) return;
+    const currentIndex = sessions.findIndex(s => s.id === activeSessionId);
+    const nextIndex = currentIndex >= sessions.length - 1 ? 0 : currentIndex + 1;
+    connectToSession(sessions[nextIndex].id);
+  };
+
   const fetchSessions = async () => {
     const res = await fetch(`${API_URL}/sessions`);
     const data = await res.json();
@@ -52,11 +88,10 @@ function App() {
   };
 
   const createSession = async () => {
-    const name = `Session ${sessions.length + 1}`;
     const res = await fetch(`${API_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name: '' })  // Send empty name to use server counter
     });
     const session = await res.json();
     setSessions([...sessions, session]);
@@ -145,6 +180,34 @@ function App() {
     }
   };
 
+  const openRenameDialog = (sessionId, currentName) => {
+    setRenamingSessionId(sessionId);
+    setNewSessionName(currentName);
+    setRenameDialogOpen(true);
+  };
+
+  const closeRenameDialog = () => {
+    setRenameDialogOpen(false);
+    setRenamingSessionId(null);
+    setNewSessionName('');
+  };
+
+  const renameSession = async () => {
+    if (!newSessionName.trim() || !renamingSessionId) return;
+    
+    await fetch(`${API_URL}/sessions/${renamingSessionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newSessionName })
+    });
+    
+    setSessions(sessions.map(s => 
+      s.id === renamingSessionId ? { ...s, name: newSessionName } : s
+    ));
+    
+    closeRenameDialog();
+  };
+
   return (
     <ThemeProvider theme={muiTheme}>
       <CssBaseline />
@@ -154,6 +217,9 @@ function App() {
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             Kiro Coordinator
           </Typography>
+          <IconButton color="inherit" onClick={() => setInfoDialogOpen(true)}>
+            <InfoIcon />
+          </IconButton>
           <IconButton color="inherit" onClick={toggleTheme}>
             {theme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
@@ -176,9 +242,14 @@ function App() {
                 key={session.id}
                 disablePadding
                 secondaryAction={
-                  <IconButton edge="end" onClick={() => deleteSession(session.id)}>
-                    <CloseIcon />
-                  </IconButton>
+                  <Box>
+                    <IconButton edge="end" size="small" onClick={() => openRenameDialog(session.id, session.name)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton edge="end" onClick={() => deleteSession(session.id)}>
+                      <CloseIcon />
+                    </IconButton>
+                  </Box>
                 }
               >
                 <ListItemButton
@@ -227,6 +298,49 @@ function App() {
         )}
       </Box>
     </Box>
+    
+    <Dialog open={renameDialogOpen} onClose={closeRenameDialog}>
+      <DialogTitle>Rename Session</DialogTitle>
+      <DialogContent>
+        <TextField
+          autoFocus
+          margin="dense"
+          label="Session Name"
+          fullWidth
+          value={newSessionName}
+          onChange={(e) => setNewSessionName(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && renameSession()}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={closeRenameDialog}>Cancel</Button>
+        <Button onClick={renameSession} variant="contained">Rename</Button>
+      </DialogActions>
+    </Dialog>
+
+    <Dialog open={infoDialogOpen} onClose={() => setInfoDialogOpen(false)}>
+      <DialogTitle>Keyboard Shortcuts</DialogTitle>
+      <DialogContent>
+        <Typography variant="body1" gutterBottom>
+          Navigate between sessions:
+        </Typography>
+        <Typography variant="body2" sx={{ ml: 2, mb: 1 }}>
+          • <strong>Cmd+Shift+↑</strong> (Mac) or <strong>Ctrl+Shift+↑</strong> - Previous session
+        </Typography>
+        <Typography variant="body2" sx={{ ml: 2, mb: 2 }}>
+          • <strong>Cmd+Shift+↓</strong> (Mac) or <strong>Ctrl+Shift+↓</strong> - Next session
+        </Typography>
+        <Typography variant="body1" gutterBottom>
+          Theme:
+        </Typography>
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          • Click the sun/moon icon to toggle dark/light mode
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setInfoDialogOpen(false)} variant="contained">Close</Button>
+      </DialogActions>
+    </Dialog>
     </ThemeProvider>
   );
 }

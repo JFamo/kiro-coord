@@ -155,6 +155,61 @@ async def get_agents():
         return []
 
 
+@app.get("/agents/{agent_id}")
+async def get_agent(agent_id: str):
+    """Get a specific agent configuration."""
+    try:
+        filepath = os.path.expanduser(f'~/.kiro/agents/{agent_id}.json')
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/agents/{agent_id}")
+async def update_agent(agent_id: str, agent_config: dict):
+    """Update an agent configuration."""
+    try:
+        filepath = os.path.expanduser(f'~/.kiro/agents/{agent_id}.json')
+        with open(filepath, 'w') as f:
+            json.dump(agent_config, f, indent=2)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/available-tools")
+async def get_available_tools():
+    """Get list of all available tools from all agents."""
+    try:
+        agents_dir = os.path.expanduser('~/.kiro/agents')
+        all_tools = set()
+        
+        # Add common built-in tools
+        all_tools.update(['*', 'read', 'write', 'shell', 'grep', 'glob', 'code', 'execute_bash', 'use_aws'])
+        
+        if os.path.exists(agents_dir):
+            for filename in os.listdir(agents_dir):
+                if filename.endswith('.json') and not filename.endswith('.example'):
+                    filepath = os.path.join(agents_dir, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            agent_config = json.load(f)
+                            tools = agent_config.get("tools", [])
+                            all_tools.update(tools)
+                            
+                            # Add MCP server tools
+                            mcp_servers = agent_config.get("mcpServers", {})
+                            for server_name in mcp_servers.keys():
+                                all_tools.add(f'@{server_name}')
+                    except:
+                        continue
+        
+        return sorted(list(all_tools))
+    except Exception as e:
+        return []
+
+
 @app.post("/theme")
 async def set_theme(request: ThemeRequest):
     try:

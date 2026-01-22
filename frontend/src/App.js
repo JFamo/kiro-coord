@@ -4,6 +4,7 @@ import { Add as AddIcon, Close as CloseIcon, LightMode as LightModeIcon, DarkMod
 import '@xterm/xterm/css/xterm.css';
 import { DRAWER_WIDTH, API_URL, WS_URL, darkTheme as terminalDarkTheme, lightTheme as terminalLightTheme } from './config';
 import { createTerminal, setupResizeHandler, normalizeLineEndings } from './terminalUtils';
+import AgentEditor from './AgentEditor';
 
 function App() {
   const [sessions, setSessions] = useState([]);
@@ -16,6 +17,7 @@ function App() {
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
   const [agents, setAgents] = useState([]);
+  const [editingAgentId, setEditingAgentId] = useState(null);
   const wsRef = useRef(null);
   const terminalRef = useRef(null);
   const terminalContainerRef = useRef(null);
@@ -305,48 +307,62 @@ function App() {
       <Box component="main" sx={{ flexGrow: 1, p: 3, display: 'flex', flexDirection: 'column' }}>
         <Toolbar />
         {showAgents ? (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h5">Agents</Typography>
-              <Button 
-                variant="outlined" 
-                onClick={() => setShowAgents(false)}
-              >
-                Back to Sessions
-              </Button>
+          editingAgentId ? (
+            <AgentEditor 
+              agentId={editingAgentId} 
+              onBack={() => {
+                setEditingAgentId(null);
+                fetchAgents();
+              }} 
+            />
+          ) : (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h5">Agents</Typography>
+                <Button 
+                  variant="outlined" 
+                  onClick={() => setShowAgents(false)}
+                >
+                  Back to Sessions
+                </Button>
+              </Box>
+              {agents.length === 0 ? (
+                <Typography color="text.secondary">No agents found in ~/.kiro/agents</Typography>
+              ) : (
+                <List>
+                  {agents.map((agent) => (
+                    <Paper 
+                      key={agent.id} 
+                      sx={{ mb: 2, p: 2, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                      onClick={() => setEditingAgentId(agent.id)}
+                    >
+                      <Typography variant="h6">{agent.name}</Typography>
+                      {agent.description && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          {agent.description}
+                        </Typography>
+                      )}
+                      {agent.model && (
+                        <Typography variant="caption" display="block">
+                          Model: {agent.model}
+                        </Typography>
+                      )}
+                      {agent.mcpServers.length > 0 && (
+                        <Typography variant="caption" display="block">
+                          MCP Servers: {agent.mcpServers.join(', ')}
+                        </Typography>
+                      )}
+                      {agent.resources.length > 0 && (
+                        <Typography variant="caption" display="block">
+                          Resources: {agent.resources.length} configured
+                        </Typography>
+                      )}
+                    </Paper>
+                  ))}
+                </List>
+              )}
             </Box>
-            {agents.length === 0 ? (
-              <Typography color="text.secondary">No agents found in ~/.kiro/agents</Typography>
-            ) : (
-              <List>
-                {agents.map((agent) => (
-                  <Paper key={agent.id} sx={{ mb: 2, p: 2 }}>
-                    <Typography variant="h6">{agent.name}</Typography>
-                    {agent.description && (
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                        {agent.description}
-                      </Typography>
-                    )}
-                    {agent.model && (
-                      <Typography variant="caption" display="block">
-                        Model: {agent.model}
-                      </Typography>
-                    )}
-                    {agent.mcpServers.length > 0 && (
-                      <Typography variant="caption" display="block">
-                        MCP Servers: {agent.mcpServers.join(', ')}
-                      </Typography>
-                    )}
-                    {agent.resources.length > 0 && (
-                      <Typography variant="caption" display="block">
-                        Resources: {agent.resources.length} configured
-                      </Typography>
-                    )}
-                  </Paper>
-                ))}
-              </List>
-            )}
-          </Box>
+          )
         ) : activeSessionId ? (
           <>
             <Paper sx={{ flexGrow: 1, mb: 2, overflow: 'hidden', p: 0 }}>
